@@ -103,7 +103,7 @@ Each child gets a calendar entity that appears in the HA Calendar dashboard. Whe
 |---|---|
 | Summary | Subject name and code (e.g. `Matematiikka MA`) |
 | Description | Full subject name and teacher |
-| Location | Room (e.g. `Puro`, `li1`) |
+| Location | Room (e.g. `101`, `Gym`) |
 | Start / End | Exact lesson times |
 
 ## Automations

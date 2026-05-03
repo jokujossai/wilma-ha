@@ -53,9 +53,10 @@ HOW IT WORKS (HA concepts)
 
     Data structure
         coordinator.data[child_name] = {
-            "exams":    [...],   # list of exam dicts
-            "messages": [...],   # list of message dicts (with body)
-            "schedule": [...],   # list of schedule event dicts
+            "exams":      [...],   # list of exam dicts
+            "messages":   [...],   # list of message dicts (with body)
+            "schedule":   [...],   # list of schedule event dicts
+            "attendance": [...],   # list of attendance mark dicts
         }
 
     update_interval
@@ -75,6 +76,7 @@ from .const import (
     DOMAIN,
     EVENT_NEW_EXAM,
     EVENT_NEW_MESSAGE,
+    EVENT_NEW_ATTENDANCE,
     DEFAULT_SCHEDULE_PAST_WEEKS,
     DEFAULT_SCHEDULE_FUTURE_WEEKS,
 )
@@ -118,10 +120,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.future_weeks = future_weeks
         self._known_exams: dict[str, set] = {}
         self._known_message_ids: dict[str, set] = {}
+        self._known_attendance_keys: dict[str, set] = {}
 
     async def _async_update_data(self) -> dict:
         try:
-            data, new_exam_events, new_message_events = await self.hass.async_add_executor_job(
+            data, new_exam_events, new_message_events, new_attendance_events = await self.hass.async_add_executor_job(
                 self._fetch_all
             )
         except Exception as err:
@@ -131,15 +134,18 @@ class WilmaCoordinator(DataUpdateCoordinator):
             self.hass.bus.async_fire(EVENT_NEW_EXAM, event_data)
         for event_data in new_message_events:
             self.hass.bus.async_fire(EVENT_NEW_MESSAGE, event_data)
+        for event_data in new_attendance_events:
+            self.hass.bus.async_fire(EVENT_NEW_ATTENDANCE, event_data)
 
         return data
 
-    def _fetch_all(self) -> tuple[dict, list[dict], list[dict]]:
+    def _fetch_all(self) -> tuple[dict, list[dict], list[dict], list[dict]]:
         self.client.login()
 
         result = {}
         new_exam_events = []
         new_message_events = []
+        new_attendance_events = []
 
         today = date.today()
         start_date = today - timedelta(weeks=self.past_weeks)
@@ -208,6 +214,22 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
             schedule_events.sort(key=lambda e: (e["date"].split(".")[::-1], e["start_time"]))
 
-            result[name] = {"exams": exams, "messages": matched, "schedule": schedule_events}
+            # ── Attendance ───────────────────────────────────────────────────
+            attendance = self.client.get_attendance(child_id)
 
-        return result, new_exam_events, new_message_events
+            current_att_keys = {
+                f"{e['date_iso']}|{e['subject']}|{e['type']}|{e['type_id']}"
+                for e in attendance
+            }
+            known_att_keys = self._known_attendance_keys.get(name)
+            if known_att_keys is not None:
+                new_att_keys = current_att_keys - known_att_keys
+                for entry in attendance:
+                    key = f"{entry['date_iso']}|{entry['subject']}|{entry['type']}|{entry['type_id']}"
+                    if key in new_att_keys:
+                        new_attendance_events.append({"child": name, **entry})
+            self._known_attendance_keys[name] = current_att_keys
+
+            result[name] = {"exams": exams, "messages": matched, "schedule": schedule_events, "attendance": attendance}
+
+        return result, new_exam_events, new_message_events, new_attendance_events

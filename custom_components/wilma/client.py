@@ -41,6 +41,56 @@ _BODY_PREVIEW_LEN = 1000
 _LOGGER = logging.getLogger(__name__)
 
 
+def _parse_attendance_title(title: str) -> dict:
+    """
+    Parse a Wilma attendance cell title into structured fields.
+
+    Observed formats:
+      "SUBJECT; TYPE, SHORT; DESC /TEACHER"
+      "SUBJECT; TYPE; DESC /TEACHER"
+      "SUBJECT; TYPE /TEACHER"
+      "TYPE, SHORT; DESC /TEACHER"   (no subject)
+      "DESC /TEACHER"                (free-form note, no subject/type)
+    """
+    teacher = ""
+    last_slash = title.rfind(" /")
+    if last_slash != -1:
+        teacher = title[last_slash + 2:].strip()
+        title = title[:last_slash].strip()
+
+    parts = [p.strip() for p in title.split(";")]
+
+    subject = ""
+    type_name = ""
+    description = ""
+
+    if len(parts) >= 3:
+        subject = parts[0]
+        type_part = parts[1].split(",", 1)
+        type_name = type_part[0].strip()
+        short = type_part[1].strip() if len(type_part) > 1 else ""
+        description = parts[2].strip()
+        if short and description:
+            description = f"{short}; {description}"
+        elif short:
+            description = short
+    elif len(parts) == 2:
+        subject = parts[0]
+        type_part = parts[1].split(",", 1)
+        type_name = type_part[0].strip()
+        if len(type_part) > 1:
+            description = type_part[1].strip()
+    else:
+        description = parts[0]
+
+    return {
+        "subject":     subject,
+        "type":        type_name,
+        "description": description,
+        "teacher":     teacher,
+    }
+
+
 def _parse_date_iso(date_str: str) -> str | None:
     """Parse Finnish exam date like 'Ti 14.4.2026' to '2026-04-14'."""
     match = re.search(r'(\d{1,2})\.(\d{1,2})\.(\d{4})', date_str)
@@ -178,6 +228,59 @@ class WilmaClient:
                 "color":        e.get("Color", ""),
             })
         return result
+
+    # ── Attendance ────────────────────────────────────────────────────────────
+
+    def get_attendance(self, child_id: str) -> list[dict]:
+        """
+        Fetch attendance marks for a child from /!{child_id}/attendance/view.
+
+        Each event cell carries a CSS class at-tp{id} indicating the mark type
+        and a title attribute with the full detail string.
+
+        Title format (semicolon-delimited):
+          "SUBJECT; TYPE[, SHORT_NOTE]; DESCRIPTION /TEACHER"
+
+        Returns a list of dicts (newest date first) with keys:
+          date, date_iso, weekday, subject, type, type_id, description, teacher
+        """
+        r = self.session.get(f"{self.base_url}/!{child_id}/attendance/view")
+        r.raise_for_status()
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        table = soup.find("table", class_="attendance-single")
+        if not table:
+            return []
+
+        entries = []
+        for row in table.select("tbody tr"):
+            cells = row.find_all("td")
+            if len(cells) < 2:
+                continue
+
+            weekday = cells[0].get_text(strip=True)
+            date_text = cells[1].get_text(strip=True)
+            date_iso = _parse_date_iso(date_text)
+
+            for cell in row.select("td.event"):
+                type_id = "other"
+                for cls in cell.get("class", []):
+                    m = re.match(r"at-tp(\d+)", cls)
+                    if m:
+                        type_id = m.group(1)
+                        break
+
+                title = cell.get("title", "").strip()
+                parsed = _parse_attendance_title(title)
+                entries.append({
+                    "date":     date_text,
+                    "date_iso": date_iso,
+                    "weekday":  weekday,
+                    "type_id":  type_id,
+                    **parsed,
+                })
+
+        return entries
 
     # ── Messages ─────────────────────────────────────────────────────────────
 

@@ -19,18 +19,21 @@ HOW IT WORKS (HA concepts)
 
     coordinator.data structure
         coordinator.data[child_name] = {
-            "exams":    [...],   # list of exam dicts
-            "messages": [...],   # list of message dicts (with body)
+            "exams":      [...],   # list of exam dicts
+            "messages":   [...],   # list of message dicts (with body)
+            "attendance": [...],   # list of attendance mark dicts
         }
 
     unique_id
         Derived from the config entry ID and child ID so it stays unique
-        even across multiple Wilma accounts. Message sensor appends "_msg".
+        even across multiple Wilma accounts. Message sensor appends "_msg",
+        attendance sensor appends "_att".
 
     extra_state_attributes
         Available in automation templates via state_attr(...).
-        Exam sensor:    exams, next_exam, next_exam_date
-        Message sensor: messages, latest_message
+        Exam sensor:       exams, next_exam, next_exam_date
+        Message sensor:    messages, latest_message
+        Attendance sensor: entries, latest_entry
 """
 
 from homeassistant.components.sensor import SensorEntity
@@ -52,6 +55,7 @@ async def async_setup_entry(
     for child in coordinator.children:
         entities.append(WilmaExamSensor(coordinator, child, entry.entry_id))
         entities.append(WilmaMessageSensor(coordinator, child, entry.entry_id))
+        entities.append(WilmaAttendanceSensor(coordinator, child, entry.entry_id))
     async_add_entities(entities, True)
 
 
@@ -133,4 +137,44 @@ class WilmaMessageSensor(CoordinatorEntity, SensorEntity):
         attrs: dict = {"child": self._child_name, "messages": messages}
         if messages:
             attrs["latest_message"] = messages[0]
+        return attrs
+
+
+class WilmaAttendanceSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, child: dict, entry_id: str) -> None:
+        super().__init__(coordinator)
+        self._child_name = child["name"]
+        self._child_id = child["id"]
+        self._entry_id = entry_id
+
+    @property
+    def name(self) -> str:
+        return f"Wilma {self._child_name} Attendance"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_{self._child_id}_att"
+
+    @property
+    def icon(self) -> str:
+        return "mdi:clipboard-check"
+
+    @property
+    def _entries(self) -> list:
+        return self.coordinator.data.get(self._child_name, {}).get("attendance", [])
+
+    @property
+    def native_value(self) -> int:
+        return len(self._entries)
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        return "entries" if self._entries else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        entries = self._entries
+        attrs: dict = {"child": self._child_name, "entries": entries}
+        if entries:
+            attrs["latest_entry"] = entries[0]
         return attrs

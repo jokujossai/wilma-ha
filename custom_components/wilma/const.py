@@ -20,3 +20,4 @@ CONF_SCHEDULE_FUTURE_WEEKS = "schedule_future_weeks"
 
 EVENT_NEW_EXAM = "wilma_new_exam"
 EVENT_NEW_MESSAGE = "wilma_new_message"
+EVENT_NEW_ATTENDANCE = "wilma_new_attendance"
