@@ -29,7 +29,6 @@
           "scan_interval": "Poll interval (seconds)",
           "sender_filters": "Message sender filters (comma-separated, e.g. *smith*, *jane*) — leave blank for all",
           "message_limit": "Max messages to fetch per child per poll",
-          "schedule_scan_interval": "Schedule poll interval (seconds, default 86400 = daily)",
           "schedule_past_weeks": "Schedule: weeks to fetch into the past",
           "schedule_future_weeks": "Schedule: weeks to fetch into the future"
         }

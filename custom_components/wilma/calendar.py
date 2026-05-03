@@ -1,19 +1,4 @@
-"""
-calendar.py — WilmaCalendar entity (one per child)
-===================================================
-Exposes each child's timetable as a Home Assistant calendar entity.
-
-Schedule data is managed by WilmaScheduleCoordinator, which polls on its
-own independent interval (default: daily). This keeps schedule fetching
-separate from the exam/message poll cycle.
-
-The `event` property (current/next lesson) is always populated from the
-coordinator's cached data — no on-demand fetch needed.
-
-`async_get_events` serves any date range HA requests. Events inside the
-coordinator's cached window are returned directly from cache; events outside
-it (e.g. when the user scrolls far into the future) are fetched live.
-"""
+"""calendar.py — WilmaCalendar entity (one per child)"""
 
 import datetime
 import logging
@@ -35,11 +20,11 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    schedule_coordinator = hass.data[DOMAIN][f"{entry.entry_id}_schedule"]
+    coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
-            WilmaCalendar(schedule_coordinator, child, entry.entry_id)
-            for child in schedule_coordinator.children
+            WilmaCalendar(coordinator, child, entry.entry_id)
+            for child in coordinator.children
         ],
         True,
     )
@@ -66,11 +51,12 @@ class WilmaCalendar(CoordinatorEntity, CalendarEntity):
 
     @property
     def _cached_raw(self) -> list[dict]:
-        return self.coordinator.data.get(self._child_name, []) if self.coordinator.data else []
+        if not self.coordinator.data:
+            return []
+        return self.coordinator.data.get(self._child_name, {}).get("schedule", [])
 
     @property
     def event(self) -> CalendarEvent | None:
-        """Return the active event, or the next upcoming one."""
         now = dt_util.now()
         for item in self._cached_raw:
             e = _to_calendar_event(item)
@@ -93,10 +79,9 @@ class WilmaCalendar(CoordinatorEntity, CalendarEntity):
             first = _parse_date(cached[0]["date"])
             last = _parse_date(cached[-1]["date"])
             if first and last and first <= start_date.date() and end_date.date() <= last:
-                # Requested range is fully covered by the cache — serve directly.
                 return _filter_events(cached, start_date.date(), end_date.date())
 
-        # Range extends beyond the cache — fetch live.
+        # Range extends beyond cache — fetch live.
         return await hass.async_add_executor_job(
             self._fetch_events, start_date, end_date
         )

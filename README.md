@@ -19,7 +19,7 @@ A custom Home Assistant integration that monitors the [Wilma](https://www.visma.
 ### Schedule
 - One calendar entity per child (`calendar.wilma_<child_name>_schedule`)
 - Visible in the Home Assistant Calendar dashboard
-- Refreshed on its own independent poll cycle (default: daily), separate from exam/message polling
+- Refreshed on the same poll cycle as exams and messages
 - Configurable window: how many weeks back and forward to pre-fetch (default: −1 / +4 weeks)
 - Each lesson shows subject, teacher, and room
 - Requests outside the pre-fetched window are fetched live
@@ -60,10 +60,9 @@ The following options can be changed after setup via the **Configure** button on
 
 | Option | Default | Description |
 |---|---|---|
-| Poll interval | `14400` | Seconds between exam/message polls |
+| Poll interval | `14400` | Seconds between Wilma polls |
 | Sender filters | *(blank)* | Comma-separated glob patterns, e.g. `*smith*, *jones*` — blank means all senders |
 | Message limit | `10` | Max messages fetched per child per poll |
-| Schedule poll interval | `86400` | Seconds between timetable refreshes (default: daily) |
 | Schedule past weeks | `1` | How many weeks back to fetch into the calendar |
 | Schedule future weeks | `4` | How many weeks forward to fetch into the calendar |
 

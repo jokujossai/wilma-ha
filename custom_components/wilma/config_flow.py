@@ -12,8 +12,7 @@ FLOW
         On success a config entry is created and children are stored in it.
 
     Options flow (post-setup, via the Configure button):
-        User can change poll intervals, message limit, sender filters, and
-        the schedule window without re-entering credentials.
+        User can change the poll interval without re-entering credentials.
 
 ERROR KEYS (shown in the UI via strings.json)
     cannot_connect   — network/HTTP error reaching Wilma
@@ -39,12 +38,10 @@ from .const import (
     CONF_CHILDREN,
     CONF_SENDER_FILTERS,
     CONF_MESSAGE_LIMIT,
-    CONF_SCHEDULE_SCAN_INTERVAL,
     CONF_SCHEDULE_PAST_WEEKS,
     CONF_SCHEDULE_FUTURE_WEEKS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_MESSAGE_LIMIT,
-    DEFAULT_SCHEDULE_SCAN_INTERVAL,
     DEFAULT_SCHEDULE_PAST_WEEKS,
     DEFAULT_SCHEDULE_FUTURE_WEEKS,
     DOMAIN,
@@ -140,7 +137,6 @@ class WilmaOptionsFlow(config_entries.OptionsFlow):
                     vol.Required(CONF_SCAN_INTERVAL, default=_opt(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): int,
                     vol.Optional(CONF_SENDER_FILTERS, default=_opt(CONF_SENDER_FILTERS, "")): str,
                     vol.Required(CONF_MESSAGE_LIMIT, default=_opt(CONF_MESSAGE_LIMIT, DEFAULT_MESSAGE_LIMIT)): int,
-                    vol.Required(CONF_SCHEDULE_SCAN_INTERVAL, default=_opt(CONF_SCHEDULE_SCAN_INTERVAL, DEFAULT_SCHEDULE_SCAN_INTERVAL)): int,
                     vol.Required(CONF_SCHEDULE_PAST_WEEKS, default=_opt(CONF_SCHEDULE_PAST_WEEKS, DEFAULT_SCHEDULE_PAST_WEEKS)): int,
                     vol.Required(CONF_SCHEDULE_FUTURE_WEEKS, default=_opt(CONF_SCHEDULE_FUTURE_WEEKS, DEFAULT_SCHEDULE_FUTURE_WEEKS)): int,
                 }

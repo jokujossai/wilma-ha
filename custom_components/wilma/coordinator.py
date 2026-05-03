@@ -2,11 +2,11 @@
 coordinator.py — DataUpdateCoordinator for the Wilma integration
 ================================================================
 PURPOSE
-    The coordinator is the single source of truth for exam and message data.
-    It owns the polling loop, calls the Wilma HTTP client, detects new exams
-    and messages, and makes the data available to all sensor entities. Only
-    one login + HTTP round-trip per data type happens per poll cycle regardless
-    of how many sensors exist.
+    The coordinator is the single source of truth for exam, message, and
+    schedule data. It owns the polling loop, calls the Wilma HTTP client,
+    detects new exams and messages, and makes the data available to all
+    sensor and calendar entities. Only one login + HTTP round-trip per
+    poll cycle regardless of how many entities exist.
 
 HOW IT WORKS (HA concepts)
     DataUpdateCoordinator (HA base class)
@@ -55,6 +55,7 @@ HOW IT WORKS (HA concepts)
         coordinator.data[child_name] = {
             "exams":    [...],   # list of exam dicts
             "messages": [...],   # list of message dicts (with body)
+            "schedule": [...],   # list of schedule event dicts
         }
 
     update_interval
@@ -74,7 +75,6 @@ from .const import (
     DOMAIN,
     EVENT_NEW_EXAM,
     EVENT_NEW_MESSAGE,
-    DEFAULT_SCHEDULE_SCAN_INTERVAL,
     DEFAULT_SCHEDULE_PAST_WEEKS,
     DEFAULT_SCHEDULE_FUTURE_WEEKS,
 )
@@ -101,6 +101,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
         scan_interval: int,
         sender_filters: list[str],
         message_limit: int,
+        past_weeks: int = DEFAULT_SCHEDULE_PAST_WEEKS,
+        future_weeks: int = DEFAULT_SCHEDULE_FUTURE_WEEKS,
     ) -> None:
         super().__init__(
             hass,
@@ -112,6 +114,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.children = children
         self.sender_filters = sender_filters
         self.message_limit = message_limit
+        self.past_weeks = past_weeks
+        self.future_weeks = future_weeks
         self._known_exams: dict[str, set] = {}
         self._known_message_ids: dict[str, set] = {}
 
@@ -136,6 +140,10 @@ class WilmaCoordinator(DataUpdateCoordinator):
         result = {}
         new_exam_events = []
         new_message_events = []
+
+        today = date.today()
+        start_date = today - timedelta(weeks=self.past_weeks)
+        end_date = today + timedelta(weeks=self.future_weeks)
 
         for child in self.children:
             name = child["name"]
@@ -178,78 +186,19 @@ class WilmaCoordinator(DataUpdateCoordinator):
                         new_message_events.append({"child": name, **msg})
             self._known_message_ids[name] = {m["id"] for m in matched}
 
-            result[name] = {"exams": exams, "messages": matched}
-
-        return result, new_exam_events, new_message_events
-
-
-class WilmaScheduleCoordinator(DataUpdateCoordinator):
-    """
-    Separate coordinator for timetable / schedule data.
-
-    Fetches schedule for a configurable window around today on each refresh.
-    Runs independently of the main coordinator so schedule polling (default:
-    daily) doesn't inflate the exam/message poll frequency.
-
-    Each coordinator instance owns its own WilmaClient so there are no
-    shared-session race conditions with WilmaCoordinator.
-
-    Data structure:
-        coordinator.data[child_name] = [list of raw schedule dicts]
-    """
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        base_url: str,
-        username: str,
-        password: str,
-        children: list[dict],
-        scan_interval: int = DEFAULT_SCHEDULE_SCAN_INTERVAL,
-        past_weeks: int = DEFAULT_SCHEDULE_PAST_WEEKS,
-        future_weeks: int = DEFAULT_SCHEDULE_FUTURE_WEEKS,
-    ) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_schedule",
-            update_interval=timedelta(seconds=scan_interval),
-        )
-        self.client = WilmaClient(base_url, username, password)
-        self.children = children
-        self.past_weeks = past_weeks
-        self.future_weeks = future_weeks
-
-    async def _async_update_data(self) -> dict:
-        try:
-            return await self.hass.async_add_executor_job(self._fetch_schedule)
-        except Exception as err:
-            raise UpdateFailed(f"Error fetching Wilma schedule: {err}") from err
-
-    def _fetch_schedule(self) -> dict:
-        self.client.login()
-
-        today = date.today()
-        result: dict[str, list] = {}
-
-        for child in self.children:
-            name = child["name"]
-            child_id = child["id"]
-            events: list[dict] = []
+            # ── Schedule ─────────────────────────────────────────────────────
+            schedule_events: list[dict] = []
             seen_weeks: set[tuple] = set()
+            current = start_date
 
-            start = today - timedelta(weeks=self.past_weeks)
-            end = today + timedelta(weeks=self.future_weeks)
-            current = start
-
-            while current <= end:
+            while current <= end_date:
                 monday = current - timedelta(days=current.weekday())
                 week_key = monday.isocalendar()[:2]
                 if week_key not in seen_weeks:
                     seen_weeks.add(week_key)
                     date_fi = f"{monday.day}.{monday.month}.{monday.year}"
                     try:
-                        events.extend(self.client.get_schedule(child_id, date_fi))
+                        schedule_events.extend(self.client.get_schedule(child_id, date_fi))
                     except Exception as err:
                         _LOGGER.warning(
                             "Failed to fetch schedule for %s (week %s): %s",
@@ -257,7 +206,8 @@ class WilmaScheduleCoordinator(DataUpdateCoordinator):
                         )
                 current += timedelta(days=7)
 
-            events.sort(key=lambda e: (e["date"].split(".")[::-1], e["start_time"]))
-            result[name] = events
+            schedule_events.sort(key=lambda e: (e["date"].split(".")[::-1], e["start_time"]))
 
-        return result
+            result[name] = {"exams": exams, "messages": matched, "schedule": schedule_events}
+
+        return result, new_exam_events, new_message_events
