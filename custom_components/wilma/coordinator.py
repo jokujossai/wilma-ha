@@ -64,13 +64,20 @@ HOW IT WORKS (HA concepts)
 
 import fnmatch
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import WilmaClient
-from .const import DOMAIN, EVENT_NEW_EXAM, EVENT_NEW_MESSAGE
+from .const import (
+    DOMAIN,
+    EVENT_NEW_EXAM,
+    EVENT_NEW_MESSAGE,
+    DEFAULT_SCHEDULE_SCAN_INTERVAL,
+    DEFAULT_SCHEDULE_PAST_WEEKS,
+    DEFAULT_SCHEDULE_FUTURE_WEEKS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -174,3 +181,83 @@ class WilmaCoordinator(DataUpdateCoordinator):
             result[name] = {"exams": exams, "messages": matched}
 
         return result, new_exam_events, new_message_events
+
+
+class WilmaScheduleCoordinator(DataUpdateCoordinator):
+    """
+    Separate coordinator for timetable / schedule data.
+
+    Fetches schedule for a configurable window around today on each refresh.
+    Runs independently of the main coordinator so schedule polling (default:
+    daily) doesn't inflate the exam/message poll frequency.
+
+    Each coordinator instance owns its own WilmaClient so there are no
+    shared-session race conditions with WilmaCoordinator.
+
+    Data structure:
+        coordinator.data[child_name] = [list of raw schedule dicts]
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        base_url: str,
+        username: str,
+        password: str,
+        children: list[dict],
+        scan_interval: int = DEFAULT_SCHEDULE_SCAN_INTERVAL,
+        past_weeks: int = DEFAULT_SCHEDULE_PAST_WEEKS,
+        future_weeks: int = DEFAULT_SCHEDULE_FUTURE_WEEKS,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_schedule",
+            update_interval=timedelta(seconds=scan_interval),
+        )
+        self.client = WilmaClient(base_url, username, password)
+        self.children = children
+        self.past_weeks = past_weeks
+        self.future_weeks = future_weeks
+
+    async def _async_update_data(self) -> dict:
+        try:
+            return await self.hass.async_add_executor_job(self._fetch_schedule)
+        except Exception as err:
+            raise UpdateFailed(f"Error fetching Wilma schedule: {err}") from err
+
+    def _fetch_schedule(self) -> dict:
+        self.client.login()
+
+        today = date.today()
+        result: dict[str, list] = {}
+
+        for child in self.children:
+            name = child["name"]
+            child_id = child["id"]
+            events: list[dict] = []
+            seen_weeks: set[tuple] = set()
+
+            start = today - timedelta(weeks=self.past_weeks)
+            end = today + timedelta(weeks=self.future_weeks)
+            current = start
+
+            while current <= end:
+                monday = current - timedelta(days=current.weekday())
+                week_key = monday.isocalendar()[:2]
+                if week_key not in seen_weeks:
+                    seen_weeks.add(week_key)
+                    date_fi = f"{monday.day}.{monday.month}.{monday.year}"
+                    try:
+                        events.extend(self.client.get_schedule(child_id, date_fi))
+                    except Exception as err:
+                        _LOGGER.warning(
+                            "Failed to fetch schedule for %s (week %s): %s",
+                            name, week_key, err,
+                        )
+                current += timedelta(days=7)
+
+            events.sort(key=lambda e: (e["date"].split(".")[::-1], e["start_time"]))
+            result[name] = events
+
+        return result

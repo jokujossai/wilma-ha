@@ -30,6 +30,7 @@ HOW IT WORKS
     without parsing Finnish weekday names.
 """
 
+import json
 import logging
 import re
 import requests
@@ -130,6 +131,53 @@ class WilmaClient:
                     seen[child_id] = name
 
         return [{"name": name, "id": cid} for cid, name in seen.items()]
+
+    # ── Schedule ──────────────────────────────────────────────────────────────
+
+    def get_schedule(self, child_id: str, date: str) -> list[dict]:
+        """
+        Fetch the weekly schedule for a child.
+
+        date: Finnish format, e.g. '5.5.2026'. Wilma returns the full week
+        that contains the given date.
+
+        Returns a list of dicts with keys:
+          date, weekday, type, start, end, start_time, end_time,
+          subject, subject_long, teacher, room, color
+
+        start/end are minutes from midnight. start_time/end_time are HH:MM
+        strings derived from them.
+        """
+        r = self.session.get(
+            f"{self.base_url}/!{child_id}/schedule",
+            params={"date": date},
+        )
+        r.raise_for_status()
+
+        m = re.search(r"Events\s*:\s*(\[.*?\])\s*[},]", r.text, re.DOTALL)
+        if not m:
+            return []
+
+        events = json.loads(m.group(1))
+        result = []
+        for e in events:
+            start_min = e.get("Start", 0)
+            end_min = e.get("End", 0)
+            result.append({
+                "date":         e.get("Date", ""),
+                "weekday":      e.get("ViikonPaiva", ""),
+                "type":         e.get("Tyyppi", ""),
+                "start":        start_min,
+                "end":          end_min,
+                "start_time":   f"{start_min // 60:02d}:{start_min % 60:02d}",
+                "end_time":     f"{end_min // 60:02d}:{end_min % 60:02d}",
+                "subject":      e.get("Text", {}).get("0", ""),
+                "subject_long": e.get("LongText", {}).get("0", ""),
+                "teacher":      e.get("Opet", {}).get("0", ""),
+                "room":         e.get("Huoneet", {}).get("0", ""),
+                "color":        e.get("Color", ""),
+            })
+        return result
 
     # ── Messages ─────────────────────────────────────────────────────────────
 

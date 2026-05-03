@@ -1,6 +1,6 @@
 # Wilma Home Assistant Integration
 
-A custom Home Assistant integration that monitors the [Wilma](https://www.visma.com/finland/wilma/) school portal and exposes upcoming exams and school messages as sensors.
+A custom Home Assistant integration that monitors the [Wilma](https://www.visma.com/finland/wilma/) school portal and exposes upcoming exams, school messages, and weekly timetables as Home Assistant entities.
 
 ## Features
 
@@ -16,9 +16,17 @@ A custom Home Assistant integration that monitors the [Wilma](https://www.visma.
 - Fires `wilma_new_message` event when a new message arrives — use for Telegram notifications
 - Built-in sender filter ("spam filter"): configure glob patterns (e.g. `*smith*`) to only track messages from specific teachers — leave blank to track all
 
+### Schedule
+- One calendar entity per child (`calendar.wilma_<child_name>_schedule`)
+- Visible in the Home Assistant Calendar dashboard
+- Refreshed on its own independent poll cycle (default: daily), separate from exam/message polling
+- Configurable window: how many weeks back and forward to pre-fetch (default: −1 / +4 weeks)
+- Each lesson shows subject, teacher, and room
+- Requests outside the pre-fetched window are fetched live
+
 ### General
 - Children are auto-discovered after login — no manual ID lookup needed
-- Configurable poll interval, message limit, and sender filters — all via the UI
+- Configurable poll intervals, message limit, sender filters, and schedule window — all via the UI
 
 ## Screenshots
 
@@ -52,9 +60,12 @@ The following options can be changed after setup via the **Configure** button on
 
 | Option | Default | Description |
 |---|---|---|
-| Poll interval | `14400` | Seconds between Wilma polls |
+| Poll interval | `14400` | Seconds between exam/message polls |
 | Sender filters | *(blank)* | Comma-separated glob patterns, e.g. `*smith*, *jones*` — blank means all senders |
 | Message limit | `10` | Max messages fetched per child per poll |
+| Schedule poll interval | `86400` | Seconds between timetable refreshes (default: daily) |
+| Schedule past weeks | `1` | How many weeks back to fetch into the calendar |
+| Schedule future weeks | `4` | How many weeks forward to fetch into the calendar |
 
 ### Credential storage
 
@@ -84,6 +95,17 @@ State = number of unread messages in the current window.
 | `latest_message` | The most recent message |
 
 Each message in the list has: `id`, `subject`, `sender`, `sender_id`, `sent`, `is_unread`, `body`, `url`.
+
+## Calendar entity (`calendar.wilma_<child_name>_schedule`)
+
+Each child gets a calendar entity that appears in the HA Calendar dashboard. When you open the calendar view, HA calls the integration for the visible date range and lessons are displayed as events.
+
+| Field | Content |
+|---|---|
+| Summary | Subject name and code (e.g. `Matematiikka MA`) |
+| Description | Full subject name and teacher |
+| Location | Room (e.g. `Puro`, `li1`) |
+| Start / End | Exact lesson times |
 
 ## Automations
 
