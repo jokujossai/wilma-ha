@@ -79,6 +79,11 @@ from .const import (
     EVENT_NEW_ATTENDANCE,
     DEFAULT_SCHEDULE_PAST_WEEKS,
     DEFAULT_SCHEDULE_FUTURE_WEEKS,
+    DEFAULT_MESSAGE_PRIVACY,
+    MESSAGE_PRIVACY_COUNT,
+    MESSAGE_PRIVACY_SUBJECT,
+    MESSAGE_PRIVACY_SUBJECT_SENDER,
+    MESSAGE_PRIVACY_FULL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -105,6 +110,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         message_limit: int,
         past_weeks: int = DEFAULT_SCHEDULE_PAST_WEEKS,
         future_weeks: int = DEFAULT_SCHEDULE_FUTURE_WEEKS,
+        message_privacy: str = DEFAULT_MESSAGE_PRIVACY,
     ) -> None:
         super().__init__(
             hass,
@@ -116,6 +122,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.children = children
         self.sender_filters = sender_filters
         self.message_limit = message_limit
+        self.message_privacy = message_privacy
         self.past_weeks = past_weeks
         self.future_weeks = future_weeks
         self._known_exams: dict[str, set] = {}
@@ -138,6 +145,15 @@ class WilmaCoordinator(DataUpdateCoordinator):
             self.hass.bus.async_fire(EVENT_NEW_ATTENDANCE, event_data)
 
         return data
+
+    def _apply_message_privacy(self, msg: dict) -> dict:
+        if self.message_privacy == MESSAGE_PRIVACY_SUBJECT:
+            return {"id": msg["id"], "subject": msg.get("subject"), "is_unread": msg.get("is_unread")}
+        if self.message_privacy == MESSAGE_PRIVACY_SUBJECT_SENDER:
+            return {"id": msg["id"], "subject": msg.get("subject"), "sender": msg.get("sender"), "is_unread": msg.get("is_unread")}
+        if self.message_privacy == MESSAGE_PRIVACY_FULL:
+            return msg
+        return {"id": msg["id"]}  # count_only
 
     def _fetch_all(self) -> tuple[dict, list[dict], list[dict], list[dict]]:
         self.client.login()
@@ -182,14 +198,15 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 if _sender_matches(m["sender"], self.sender_filters)
             ]
 
-            for msg in matched:
-                msg["body"] = self.client.fetch_message_body(child_id, msg["id"])
+            if self.message_privacy == MESSAGE_PRIVACY_FULL:
+                for msg in matched:
+                    msg["body"] = self.client.fetch_message_body(child_id, msg["id"])
 
             known_ids = self._known_message_ids.get(name)
             if known_ids is not None:
                 for msg in matched:
                     if msg["id"] not in known_ids:
-                        new_message_events.append({"child": name, **msg})
+                        new_message_events.append({"child": name, **self._apply_message_privacy(msg)})
             self._known_message_ids[name] = {m["id"] for m in matched}
 
             # ── Schedule ─────────────────────────────────────────────────────

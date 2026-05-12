@@ -36,10 +36,12 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SENDER_FILTERS,
     CONF_MESSAGE_LIMIT,
+    CONF_MESSAGE_PRIVACY,
     CONF_SCHEDULE_PAST_WEEKS,
     CONF_SCHEDULE_FUTURE_WEEKS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_MESSAGE_LIMIT,
+    DEFAULT_MESSAGE_PRIVACY,
     DEFAULT_SCHEDULE_PAST_WEEKS,
     DEFAULT_SCHEDULE_FUTURE_WEEKS,
 )
@@ -64,6 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scan_interval=_opt(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         sender_filters=sender_filters,
         message_limit=_opt(CONF_MESSAGE_LIMIT, DEFAULT_MESSAGE_LIMIT),
+        message_privacy=_opt(CONF_MESSAGE_PRIVACY, DEFAULT_MESSAGE_PRIVACY),
         past_weeks=_opt(CONF_SCHEDULE_PAST_WEEKS, DEFAULT_SCHEDULE_PAST_WEEKS),
         future_weeks=_opt(CONF_SCHEDULE_FUTURE_WEEKS, DEFAULT_SCHEDULE_FUTURE_WEEKS),
     )

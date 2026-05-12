@@ -18,6 +18,13 @@ DEFAULT_SCHEDULE_FUTURE_WEEKS = 4
 CONF_SCHEDULE_PAST_WEEKS = "schedule_past_weeks"
 CONF_SCHEDULE_FUTURE_WEEKS = "schedule_future_weeks"
 
+CONF_MESSAGE_PRIVACY = "message_privacy"
+MESSAGE_PRIVACY_COUNT = "count_only"
+MESSAGE_PRIVACY_SUBJECT = "subject_only"
+MESSAGE_PRIVACY_SUBJECT_SENDER = "subject_sender"
+MESSAGE_PRIVACY_FULL = "full"
+DEFAULT_MESSAGE_PRIVACY = MESSAGE_PRIVACY_COUNT
+
 EVENT_NEW_EXAM = "wilma_new_exam"
 EVENT_NEW_MESSAGE = "wilma_new_message"
 EVENT_NEW_ATTENDANCE = "wilma_new_attendance"

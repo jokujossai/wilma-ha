@@ -42,7 +42,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    MESSAGE_PRIVACY_COUNT,
+    MESSAGE_PRIVACY_SUBJECT,
+    MESSAGE_PRIVACY_SUBJECT_SENDER,
+)
 
 
 async def async_setup_entry(
@@ -134,9 +139,22 @@ class WilmaMessageSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         messages = self._messages
-        attrs: dict = {"child": self._child_name, "messages": messages}
-        if messages:
-            attrs["latest_message"] = messages[0]
+        privacy = self.coordinator.message_privacy
+        attrs: dict = {"child": self._child_name}
+
+        if privacy == MESSAGE_PRIVACY_COUNT:
+            return attrs
+
+        if privacy == MESSAGE_PRIVACY_SUBJECT:
+            filtered = [{"subject": m.get("subject"), "is_unread": m.get("is_unread")} for m in messages]
+        elif privacy == MESSAGE_PRIVACY_SUBJECT_SENDER:
+            filtered = [{"subject": m.get("subject"), "sender": m.get("sender"), "is_unread": m.get("is_unread")} for m in messages]
+        else:
+            filtered = messages
+
+        attrs["messages"] = filtered
+        if filtered:
+            attrs["latest_message"] = filtered[0]
         return attrs
 
 
