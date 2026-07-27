@@ -22,7 +22,13 @@ HOW IT WORKS (HA concepts)
             "exams":      [...],   # list of exam dicts
             "messages":   [...],   # list of message dicts (with body)
             "attendance": [...],   # list of attendance mark dicts
+            "errors":     {...},   # section name -> error string
         }
+
+    available
+        Each sensor goes unavailable while its own section is listed in
+        "errors" (that poll's fetch failed and the data shown is stale),
+        without affecting the other sensors of the same child.
 
     unique_id
         Derived from the config entry ID and child ID so it stays unique
@@ -84,6 +90,13 @@ class WilmaExamSensor(CoordinatorEntity, SensorEntity):
         return "mdi:school"
 
     @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        child = (self.coordinator.data or {}).get(self._child_name, {})
+        return "exams" not in child.get("errors", {})
+
+    @property
     def _exams(self) -> list:
         return self.coordinator.data.get(self._child_name, {}).get("exams", [])
 
@@ -123,6 +136,13 @@ class WilmaMessageSensor(CoordinatorEntity, SensorEntity):
     @property
     def icon(self) -> str:
         return "mdi:message-text"
+
+    @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        child = (self.coordinator.data or {}).get(self._child_name, {})
+        return "messages" not in child.get("errors", {})
 
     @property
     def _messages(self) -> list:
@@ -176,6 +196,13 @@ class WilmaAttendanceSensor(CoordinatorEntity, SensorEntity):
     @property
     def icon(self) -> str:
         return "mdi:clipboard-check"
+
+    @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        child = (self.coordinator.data or {}).get(self._child_name, {})
+        return "attendance" not in child.get("errors", {})
 
     @property
     def _entries(self) -> list:

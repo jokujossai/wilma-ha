@@ -66,7 +66,20 @@ HOW IT WORKS (HA concepts)
             "messages":   [...],   # list of message dicts (with body)
             "schedule":   [...],   # list of schedule event dicts
             "attendance": [...],   # list of attendance mark dicts
+            "errors":     {...},   # section name -> error string for
+                                   # sections that failed this poll
         }
+
+    Per-section error handling
+        A failure in one section (exams/messages/schedule/attendance) for
+        one child must not abort the whole poll. Each section is fetched
+        in its own try/except: on failure the error is logged, recorded
+        in data[child]["errors"], and the previous poll's data for that
+        section is kept so other entities update normally. Entities check
+        "errors" in their available property and go unavailable while
+        their section is failing. Event detection cursors (_known_*) are
+        not touched for a failed section, so no spurious events fire when
+        the section recovers.
 
     update_interval
         How often the coordinator polls Wilma. Configured via scan_interval
@@ -186,6 +199,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
         start_date = today - timedelta(weeks=self.past_weeks)
         end_date = today + timedelta(weeks=self.future_weeks)
 
+        previous = self.data or {}
+
         for child in self.children:
             name = child["name"]
             child_id = fresh_ids.get(name, child["id"])
@@ -195,47 +210,61 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     "falling back to stored id %s", name, child["id"],
                 )
 
-            # ── Exams ────────────────────────────────────────────────────────
-            exams = self.client.get_exams(child_id)
+            prev = previous.get(name, {})
+            errors: dict[str, str] = {}
 
-            current_keys = {
-                f"{e.get('date_iso')}|{e.get('topic')}|{e.get('subject')}"
-                for e in exams
-            }
-            known_keys = self._known_exams.get(name)
-            if known_keys is not None:
-                new_keys = current_keys - known_keys
-                for exam in exams:
-                    key = f"{exam.get('date_iso')}|{exam.get('topic')}|{exam.get('subject')}"
-                    if key in new_keys:
-                        new_exam_events.append({"child": name, **exam})
-            self._known_exams[name] = current_keys
+            # ── Exams ────────────────────────────────────────────────────────
+            try:
+                exams = self.client.get_exams(child_id)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Fetching exams for %s failed: %s", name, err)
+                errors["exams"] = str(err)
+                exams = prev.get("exams", [])
+            else:
+                current_keys = {
+                    f"{e.get('date_iso')}|{e.get('topic')}|{e.get('subject')}"
+                    for e in exams
+                }
+                known_keys = self._known_exams.get(name)
+                if known_keys is not None:
+                    new_keys = current_keys - known_keys
+                    for exam in exams:
+                        key = f"{exam.get('date_iso')}|{exam.get('topic')}|{exam.get('subject')}"
+                        if key in new_keys:
+                            new_exam_events.append({"child": name, **exam})
+                self._known_exams[name] = current_keys
 
             # ── Messages ─────────────────────────────────────────────────────
             # Fetch all metadata (1 call), take the N newest regardless of
             # sender, then filter that window by sender. Bodies are fetched
             # only for the matched subset — at most message_limit HTTP calls.
-            all_messages = self.client.get_messages(child_id)
-            newest = all_messages[:self.message_limit]
-            matched = [
-                m for m in newest
-                if _sender_matches(m["sender"], self.sender_filters)
-            ]
+            try:
+                all_messages = self.client.get_messages(child_id)
+                newest = all_messages[:self.message_limit]
+                matched = [
+                    m for m in newest
+                    if _sender_matches(m["sender"], self.sender_filters)
+                ]
 
-            if self.message_privacy == MESSAGE_PRIVACY_FULL:
-                for msg in matched:
-                    msg["body"] = self.client.fetch_message_body(child_id, msg["id"])
-
-            known_ids = self._known_message_ids.get(name)
-            if known_ids is not None:
-                for msg in matched:
-                    if msg["id"] not in known_ids:
-                        new_message_events.append({"child": name, **self._apply_message_privacy(msg)})
-            self._known_message_ids[name] = {m["id"] for m in matched}
+                if self.message_privacy == MESSAGE_PRIVACY_FULL:
+                    for msg in matched:
+                        msg["body"] = self.client.fetch_message_body(child_id, msg["id"])
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Fetching messages for %s failed: %s", name, err)
+                errors["messages"] = str(err)
+                matched = prev.get("messages", [])
+            else:
+                known_ids = self._known_message_ids.get(name)
+                if known_ids is not None:
+                    for msg in matched:
+                        if msg["id"] not in known_ids:
+                            new_message_events.append({"child": name, **self._apply_message_privacy(msg)})
+                self._known_message_ids[name] = {m["id"] for m in matched}
 
             # ── Schedule ─────────────────────────────────────────────────────
             schedule_events: list[dict] = []
             seen_weeks: set[tuple] = set()
+            failed_weeks = 0
             current = start_date
 
             while current <= end_date:
@@ -247,30 +276,46 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     try:
                         schedule_events.extend(self.client.get_schedule(child_id, date_fi))
                     except Exception as err:
+                        failed_weeks += 1
                         _LOGGER.warning(
                             "Failed to fetch schedule for %s (week %s): %s",
                             name, week_key, err,
                         )
                 current += timedelta(days=7)
 
-            schedule_events.sort(key=lambda e: (e["date"].split(".")[::-1], e["start_time"]))
+            if failed_weeks and failed_weeks == len(seen_weeks):
+                errors["schedule"] = f"all {failed_weeks} week fetches failed"
+                schedule_events = prev.get("schedule", [])
+            else:
+                schedule_events.sort(key=lambda e: (e["date"].split(".")[::-1], e["start_time"]))
 
             # ── Attendance ───────────────────────────────────────────────────
-            attendance = self.client.get_attendance(child_id)
+            try:
+                attendance = self.client.get_attendance(child_id)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Fetching attendance for %s failed: %s", name, err)
+                errors["attendance"] = str(err)
+                attendance = prev.get("attendance", [])
+            else:
+                current_att_keys = {
+                    f"{e['date_iso']}|{e['subject']}|{e['type']}|{e['type_id']}"
+                    for e in attendance
+                }
+                known_att_keys = self._known_attendance_keys.get(name)
+                if known_att_keys is not None:
+                    new_att_keys = current_att_keys - known_att_keys
+                    for entry in attendance:
+                        key = f"{entry['date_iso']}|{entry['subject']}|{entry['type']}|{entry['type_id']}"
+                        if key in new_att_keys:
+                            new_attendance_events.append({"child": name, **entry})
+                self._known_attendance_keys[name] = current_att_keys
 
-            current_att_keys = {
-                f"{e['date_iso']}|{e['subject']}|{e['type']}|{e['type_id']}"
-                for e in attendance
+            result[name] = {
+                "exams":      exams,
+                "messages":   matched,
+                "schedule":   schedule_events,
+                "attendance": attendance,
+                "errors":     errors,
             }
-            known_att_keys = self._known_attendance_keys.get(name)
-            if known_att_keys is not None:
-                new_att_keys = current_att_keys - known_att_keys
-                for entry in attendance:
-                    key = f"{entry['date_iso']}|{entry['subject']}|{entry['type']}|{entry['type_id']}"
-                    if key in new_att_keys:
-                        new_attendance_events.append({"child": name, **entry})
-            self._known_attendance_keys[name] = current_att_keys
-
-            result[name] = {"exams": exams, "messages": matched, "schedule": schedule_events, "attendance": attendance}
 
         return result, new_exam_events, new_message_events, new_attendance_events

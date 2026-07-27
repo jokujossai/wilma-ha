@@ -50,6 +50,13 @@ class WilmaCalendar(CoordinatorEntity, CalendarEntity):
         return "mdi:calendar-school"
 
     @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        child = (self.coordinator.data or {}).get(self._child_name, {})
+        return "schedule" not in child.get("errors", {})
+
+    @property
     def _cached_raw(self) -> list[dict]:
         if not self.coordinator.data:
             return []
