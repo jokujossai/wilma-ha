@@ -33,6 +33,15 @@ HOW IT WORKS (HA concepts)
         and "wilma_new_message" with the full data dict as event data so
         automations can use the details directly in templates.
 
+    Child id re-discovery
+        Wilma rotates the /!{id}/ role ids (observed at school-year
+        rollover), so ids stored in the config entry at setup time go
+        stale and Wilma answers 500. Every poll re-runs get_children()
+        after login and resolves each configured child's id by name,
+        falling back to the stored id only if the name is not found.
+        Entity unique_ids still use the stored id, so entities stay
+        stable across rotations.
+
     New-exam detection
         Each exam is fingerprinted as "date_iso|topic|subject". On the
         first poll _known_exams is empty so no events fire (avoids a
@@ -158,6 +167,16 @@ class WilmaCoordinator(DataUpdateCoordinator):
     def _fetch_all(self) -> tuple[dict, list[dict], list[dict], list[dict]]:
         self.client.login()
 
+        # Wilma rotates the /!{id}/ role ids (observed at school-year
+        # rollover), after which ids stored in the config entry return
+        # HTTP 500. Re-discover on every poll and resolve ids by child
+        # name; the stored id is only a fallback.
+        try:
+            fresh_ids = {c["name"]: c["id"] for c in self.client.get_children()}
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Re-discovering Wilma children failed: %s", err)
+            fresh_ids = {}
+
         result = {}
         new_exam_events = []
         new_message_events = []
@@ -169,7 +188,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
         for child in self.children:
             name = child["name"]
-            child_id = child["id"]
+            child_id = fresh_ids.get(name, child["id"])
+            if name not in fresh_ids:
+                _LOGGER.warning(
+                    "Child %r not found on the Wilma home page; "
+                    "falling back to stored id %s", name, child["id"],
+                )
 
             # ── Exams ────────────────────────────────────────────────────────
             exams = self.client.get_exams(child_id)
