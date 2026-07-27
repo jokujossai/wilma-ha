@@ -99,6 +99,7 @@ class WilmaCalendar(CoordinatorEntity, CalendarEntity):
         end_date: datetime.datetime,
     ) -> list[CalendarEvent]:
         self.coordinator.client.login()
+        child_id = self.coordinator.resolved_ids.get(self._child_name, self._child_id)
 
         events: list[CalendarEvent] = []
         seen_weeks: set[tuple] = set()
@@ -111,7 +112,7 @@ class WilmaCalendar(CoordinatorEntity, CalendarEntity):
                 seen_weeks.add(week_key)
                 date_fi = f"{monday.day}.{monday.month}.{monday.year}"
                 try:
-                    raw = self.coordinator.client.get_schedule(self._child_id, date_fi)
+                    raw = self.coordinator.client.get_schedule(child_id, date_fi)
                     for item in raw:
                         e = _to_calendar_event(item)
                         if e and start_date.date() <= e.start.date() <= end_date.date():

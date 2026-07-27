@@ -150,6 +150,10 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self._known_exams: dict[str, set] = {}
         self._known_message_ids: dict[str, set] = {}
         self._known_attendance_keys: dict[str, set] = {}
+        # name -> current Wilma id, refreshed on every poll. Consumers that
+        # fetch outside the poll cycle (calendar live fetch) use this so
+        # they don't hit stale stored ids.
+        self.resolved_ids: dict[str, str] = {}
 
     async def _async_update_data(self) -> dict:
         try:
@@ -189,6 +193,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Re-discovering Wilma children failed: %s", err)
             fresh_ids = {}
+        self.resolved_ids = fresh_ids
 
         result = {}
         new_exam_events = []
